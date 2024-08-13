@@ -9,7 +9,7 @@ def test_pick():
     from colt.active.llm import pick
     portfolio = [("C", 1), ("CC", 2)]
     pool = ["CCC", "CCCC"]
-    model = "gpt2"
+    model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
     result = pick(portfolio, pool, model)
     print(result)
     
