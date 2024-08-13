@@ -34,7 +34,7 @@ class Task:
         
         # if there is no description, parse the docstring.
         if self.description is None:
-            self.description = self.implementation.__doc__
+            self.description = self.implementation.__doc__.lower()
         
             
             
