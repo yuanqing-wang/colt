@@ -13,3 +13,4 @@ def test_pick():
     result = pick(portfolio, pool, model)
     print(result)
     
+    
