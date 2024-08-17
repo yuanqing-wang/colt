@@ -7,8 +7,6 @@ from .model import WrappedModel
 from pyro.nn.module import to_pyro_module_
 NUM_SAMPLES = 8
 
-
-
 def rsetattr(obj, attr, val):
     pre, _, post = attr.rpartition('.')
     return setattr(rgetattr(obj, pre) if pre else obj, post, val)
@@ -48,14 +46,15 @@ def init_sigma(model, value):
     for name, param in params.items():
         rsetattr(model, name, params[name])
 
-class UnwrappedBayesianModel(torch.nn.Module):
+class UnwrappedBNNModel(torch.nn.Module):
     def __init__(
         self,
         sigma: float = 1.0,
         *args, **kwargs,
     ):
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.sigma = sigma
+        kwargs["out_features"] = 2 * kwargs["out_features"]
         self.layers = Sequential(*args, **kwargs)
         self._prepare_buffer()
     
@@ -70,14 +69,22 @@ class UnwrappedBayesianModel(torch.nn.Module):
             buffered_params[name] = base_name
         self.buffered_params = buffered_params
         
-    def forward(self, *args, **kwargs):
-        return self.layers(*args, **kwargs)
+    def forward(self, g, h, y):
+        y_hat = self.layers(g, h)
+        y_hat_mu, y_hat_log_sigma = y_hat.split(y_hat.shape[-1] // 2, dim=-1)
+        with pyro.plate("data", y.shape[0]):
+            pyro.sample(
+                "obs", 
+                pyro.distributions.Normal(
+                    y_hat_mu, 
+                    y_hat_log_sigma.exp()
+                ).to_event(1), 
+            obs=y)
     
-class WrappedBayesianModel(torch.nn.Module):
+class WrappedBNNModel(WrappedModel):
     def __init__(
         self, 
-        autoguide: pyro.infer.autoguide.guides.AutoGuide,
-        head: str,
+        autoguide: pyro.infer.autoguide.guides.AutoGuide = pyro.infer.autoguide.AutoDiagonalNormal,
         sigma: float = 1.0,
         optimizer: str = "Adam",
         lr: float = 1e-2,
@@ -89,15 +96,15 @@ class WrappedBayesianModel(torch.nn.Module):
         *args, 
         **kwargs,
     ):
-        model = UnwrappedBayesianModel(*args, **kwargs)
+        
+        model = UnwrappedBNNModel(*args, **kwargs)
         to_pyro_module_(model)
         init_sigma(model, sigma)
-        super().__init__(model)
+        super().__init__(model=model)
 
-        self.model.guide = autoguide(model)
+        self.guide = autoguide(self.model)
 
         # initialize head
-        self.head = head()
         self.automatic_optimization = False
         self.save_hyperparameters()
 
@@ -131,3 +138,21 @@ class WrappedBayesianModel(torch.nn.Module):
         self.model.cpu(*args, **kwargs)
         init_sigma(self.model, self.model.sigma)
         return super().cpu(*args, **kwargs)
+    
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+    
+    def training_step(self, batch, batch_idx):
+        """Training step for the model."""
+        g, h, y = batch
+        h = g.ndata["h"]
+        y = y.float()
+        loss = self.svi.step(g, h, y)
+
+        # NOTE: `self.optimizers` here is None
+        # but this is to trick the lightning module
+        # to count steps
+        self.optimizers().step()
+        return None
+    
+    

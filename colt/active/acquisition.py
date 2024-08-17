@@ -1,6 +1,5 @@
 from typing import List
 from .molecule import Molecule, assay
-from .llm import pick, tournament
 
 class Acquisition:    
     def pick(

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
+import torch
+import dgl
 
 @dataclass
 class Molecule:
@@ -25,11 +27,10 @@ class Molecule:
     
     def __eq__(self, other):
         return self.smiles == other.smiles
-    
 
-@dataclass
-class Dataset:
-    molecules: tuple[Molecule]
+class Dataset(torch.utils.data.Dataset):
+    def __init__(self, molecules):
+        self.molecules = tuple(molecules)
         
     def featurize(self):
         for molecule in self.molecules:
@@ -47,11 +48,26 @@ class Dataset:
         return self.molecules[index]
             
     def __sub__(self, molecule):
-        return Dataset([m for m in self.molecules if m != molecule])
+        return self.__class__([m for m in self.molecules if m != molecule])
     
     def __add__(self, molecule):
-        return Dataset(self.molecules + (molecule,))
-            
+        return self.__class__(self.molecules + (molecule,))
+    
+    def serve_graphs(self):
+        return torch.utils.data.DataLoader(
+            self,
+            batch_size=len(self),
+            collate_fn=graph_collate,
+        )
+    
+    
+def graph_collate(batch):
+    g = dgl.batch([molecule.graph for molecule in batch])
+    h = g.ndata['h']
+    y = torch.tensor([molecule.y for molecule in batch])
+    return g, h, y
+
+    
 def assay(
     molecule: Molecule,
     past: Dataset,
