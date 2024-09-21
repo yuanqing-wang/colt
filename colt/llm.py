@@ -1,4 +1,5 @@
 import re
+import torch
 from typing import List
 from transformers import pipeline
 from functools import lru_cache, partial
@@ -90,12 +91,16 @@ class LLMAcquisition(Acquisition):
         past: List[Molecule],
         future: List[Molecule],
     ):
+        past.shuffle()
+        future.shuffle()
         past = [(molecule.smiles, molecule.y) for molecule in past]
         future = [molecule.smiles for molecule in future]
+        best = None
         for _ in range(self.tries):
-            # best = tournament(past=past, future=future, model=self.model)
             best = pick(past=past, future=future, model=self.model)
             if best in future:
+                best = Molecule(best)
                 break
-        best = Molecule(best)
+        if best is None:
+            best = Molecule(future[0])
         return best

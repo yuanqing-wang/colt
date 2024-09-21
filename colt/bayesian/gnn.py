@@ -3,7 +3,7 @@ import torch
 import dgl
 from .zoo import GCN
 
-class Sequential(torch.nn.Module):
+class GNN(torch.nn.Module):
     def __init__(
         self,
         in_features: int,
@@ -25,6 +25,8 @@ class Sequential(torch.nn.Module):
         )
         self.activation = activation
         self.pool = Aggregation(hidden_features, out_features)
+        self.hidden_features = hidden_features
+        self.out_features = out_features
         
     def forward(self, g: dgl.DGLGraph, h: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:

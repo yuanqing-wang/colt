@@ -1,4 +1,5 @@
 from typing import List
+import numpy as np
 from .molecule import Molecule, Dataset, assay
 from .acquisition import Acquisition
 
@@ -26,6 +27,12 @@ class Trial:
                 past=self.past,
                 future=self.future,
             )
+            
+    @property
+    def trajectory(self):
+        return np.array(
+            [molecule.y for molecule in self.past]
+        )
         
         
         

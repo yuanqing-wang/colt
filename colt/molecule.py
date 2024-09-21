@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 import torch
+import numpy as np
 import dgl
 
 @dataclass
@@ -27,6 +28,12 @@ class Molecule:
     
     def __eq__(self, other):
         return self.smiles == other.smiles
+    
+def graph_collate(batch):
+    g = dgl.batch([molecule.graph for molecule in batch])
+    h = g.ndata['h']
+    y = torch.tensor([molecule.y for molecule in batch])
+    return g, h, y
 
 class Dataset(torch.utils.data.Dataset):
     def __init__(self, molecules):
@@ -53,6 +60,9 @@ class Dataset(torch.utils.data.Dataset):
     def __add__(self, molecule):
         return self.__class__(self.molecules + (molecule,))
     
+    def shuffle(self):
+        self.molecules = tuple(np.random.permutation(self.molecules))
+    
     def serve_graphs(self):
         return torch.utils.data.DataLoader(
             self,
@@ -61,11 +71,7 @@ class Dataset(torch.utils.data.Dataset):
         )
     
     
-def graph_collate(batch):
-    g = dgl.batch([molecule.graph for molecule in batch])
-    h = g.ndata['h']
-    y = torch.tensor([molecule.y for molecule in batch])
-    return g, h, y
+
 
     
 def assay(

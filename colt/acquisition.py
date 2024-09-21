@@ -18,6 +18,14 @@ class Acquisition:
         past, future = assay(best, past, future)
         return past, future
     
+class RandomAcquisition(Acquisition):
+    def pick(
+        self,
+        past: List[Molecule],
+        future: List[Molecule],
+    ):
+        import random
+        return random.choice(future)
 
 
 

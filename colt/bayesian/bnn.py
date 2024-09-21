@@ -2,7 +2,7 @@ import torch
 import pyro
 
 import functools
-from .sequential import Sequential
+from .gnn import GNN
 from .model import WrappedModel
 from pyro.nn.module import to_pyro_module_
 NUM_SAMPLES = 8
@@ -49,13 +49,12 @@ def init_sigma(model, value):
 class UnwrappedBNNModel(torch.nn.Module):
     def __init__(
         self,
+        representation: torch.nn.Module,
         sigma: float = 1.0,
-        *args, **kwargs,
     ):
         super().__init__()
         self.sigma = sigma
-        kwargs["out_features"] = 2 * kwargs["out_features"]
-        self.layers = Sequential(*args, **kwargs)
+        self.representation = representation
         self._prepare_buffer()
     
     def _prepare_buffer(self):
@@ -69,35 +68,37 @@ class UnwrappedBNNModel(torch.nn.Module):
             buffered_params[name] = base_name
         self.buffered_params = buffered_params
         
-    def forward(self, g, h, y):
-        y_hat = self.layers(g, h)
+    def forward(self, g, h, y=None):
+        y_hat = self.representation(g, h)
         y_hat_mu, y_hat_log_sigma = y_hat.split(y_hat.shape[-1] // 2, dim=-1)
-        with pyro.plate("data", y.shape[0]):
-            pyro.sample(
+        with pyro.plate("data", g.batch_size):
+            y_hat = pyro.sample(
                 "obs", 
                 pyro.distributions.Normal(
-                    y_hat_mu, 
-                    y_hat_log_sigma.exp()
-                ).to_event(1), 
+                    y_hat_mu.squeeze(-1), 
+                    torch.nn.functional.softplus(y_hat_log_sigma).squeeze(-1),
+                ), 
             obs=y)
+                        
+        return y_hat
     
 class WrappedBNNModel(WrappedModel):
+    _refresh = False
     def __init__(
         self, 
+        representation: torch.nn.Module,
         autoguide: pyro.infer.autoguide.guides.AutoGuide = pyro.infer.autoguide.AutoDiagonalNormal,
         sigma: float = 1.0,
         optimizer: str = "Adam",
-        lr: float = 1e-2,
-        weight_decay: float = 1e-3,
+        lr: float = 1e-3,
+        weight_decay: float = 1e-5,
         loss: torch.nn.Module = pyro.infer.Trace_ELBO(
             num_particles=NUM_SAMPLES,
             vectorize_particles=True,
         ),
-        *args, 
-        **kwargs,
     ):
         
-        model = UnwrappedBNNModel(*args, **kwargs)
+        model = UnwrappedBNNModel(representation=representation)
         to_pyro_module_(model)
         init_sigma(model, sigma)
         super().__init__(model=model)
@@ -114,7 +115,7 @@ class WrappedBNNModel(WrappedModel):
         )
 
         self.svi = pyro.infer.SVI(
-            self.forward,
+            self.model.forward,
             self.guide,
             optim=optimizer,
             loss=loss,
@@ -139,8 +140,17 @@ class WrappedBNNModel(WrappedModel):
         init_sigma(self.model, self.model.sigma)
         return super().cpu(*args, **kwargs)
     
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
+    def forward(self, g, h):
+        predictive = pyro.infer.Predictive(
+            self.svi.model,
+            guide=self.svi.guide,
+            num_samples=NUM_SAMPLES,
+            parallel=True,
+            return_sites=["_RETURN", "obs"],
+        )
+
+        y_hat = predictive(g, h)["obs"]
+        return y_hat
     
     def training_step(self, batch, batch_idx):
         """Training step for the model."""
@@ -148,6 +158,7 @@ class WrappedBNNModel(WrappedModel):
         h = g.ndata["h"]
         y = y.float()
         loss = self.svi.step(g, h, y)
+
 
         # NOTE: `self.optimizers` here is None
         # but this is to trick the lightning module

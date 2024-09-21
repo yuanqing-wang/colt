@@ -1,2 +1,2 @@
 # colt
-Chemoinformatics Oracles for LLM Training
+Chemical Optimization with Language-based and Traditional models
